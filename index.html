@@ -1301,23 +1301,9 @@ function openTripForm(tripId){
     document.getElementById('f_endAddr').value = state.settings.officeAddr || "";
     document.getElementById('f_endTime').value = "";
     document.getElementById('f_endOdo').value = "";
-
-    // 新規作成の「＋」を押した時点で仮保存し、スプレッドシートへ即時反映する
-    createDraftTripNow();
   }
   recalcDistance();
   document.getElementById('tripOverlay').style.display = "flex";
-}
-
-function createDraftTripNow(){
-  const date = document.getElementById('f_date').value || todayISO();
-  const trip = buildTripFromForm(date);
-  trip.updatedAt = Date.now();
-  state.trips.push(trip);
-  editingTripId = trip.id;
-  persist();
-  document.getElementById('deleteTripBtn').style.display = "block";
-  renderMonth();
 }
 
 function getSortedMonthTrips(){
@@ -1408,11 +1394,10 @@ function autofillWaypoint(inputEl){
 /* ---------- Vertical place autocomplete (replaces horizontal-scrolling native datalist) ---------- */
 function showPlaceSuggestions(inputEl, listEl, addrInputEl){
   if(!listEl) return;
-  const q = inputEl.value.trim();
+  const q = inputEl.value.trim().toLowerCase();
   listEl.innerHTML = "";
-  if(!q){ listEl.style.display = "none"; return; }
-  const qLower = q.toLowerCase();
-  const matches = state.places.filter(p=> p.name.toLowerCase().includes(qLower)).slice(0, 8);
+  const sortedPlaces = state.places.slice().sort((a,b)=> (a.order||0) - (b.order||0));
+  const matches = (q ? sortedPlaces.filter(p=> p.name.toLowerCase().includes(q)) : sortedPlaces).slice(0, 10);
   if(matches.length===0){ listEl.style.display = "none"; return; }
   matches.forEach(p=>{
     const item = document.createElement('div');
@@ -1934,6 +1919,42 @@ async function startGpsTrip(){
   }
 }
 
+async function ensurePlaceCoords(place){
+  if(place.lat != null && place.lng != null) return true;
+  if(!place.addr || !state.settings.gmapsKey) return false;
+  try{
+    await loadGoogleMapsApi();
+    const geocoder = new google.maps.Geocoder();
+    const result = await new Promise((resolve, reject)=>{
+      geocoder.geocode({ address: place.addr }, (results, status)=>{
+        if(status === "OK" && results && results[0]) resolve(results[0]);
+        else reject(new Error(status));
+      });
+    });
+    place.lat = result.geometry.location.lat();
+    place.lng = result.geometry.location.lng();
+    return true;
+  }catch(e){
+    return false;
+  }
+}
+
+async function findNearestKnownPlace(lat, lng, thresholdKm){
+  thresholdKm = thresholdKm || 0.3; // 約300m以内なら同じ場所とみなす
+  if(!state.settings.gmapsKey) return null;
+  const candidates = state.places.filter(p=> p.addr);
+  await Promise.all(candidates.map(p=> ensurePlaceCoords(p)));
+  persist(); // 一度調べた座標はキャッシュして次回から再取得しない
+
+  let best = null, bestDist = Infinity;
+  candidates.forEach(p=>{
+    if(p.lat == null || p.lng == null) return;
+    const d = haversineKm(lat, lng, p.lat, p.lng);
+    if(d < bestDist){ bestDist = d; best = p; }
+  });
+  return (best && bestDist <= thresholdKm) ? best : null;
+}
+
 async function addGpsWaypoint(){
   if(!gpsTrip) return;
   showToast("現在地を測定中...");
@@ -1941,16 +1962,25 @@ async function addGpsWaypoint(){
     const pos = await getBestPosition(8000);
     const lat = pos.coords.latitude, lng = pos.coords.longitude;
     let addr = lat.toFixed(6) + ", " + lng.toFixed(6);
+    let matchedName = null;
 
     const finalize = ()=>{
-      gpsTrip.waypoints.push({ time: nowHHMM(), lat, lng, addr });
+      gpsTrip.waypoints.push({ time: nowHHMM(), lat, lng, addr, place: matchedName });
       gpsTrip.path.push({ lat, lng });
       localStorage.setItem('gps-trip-draft', JSON.stringify(gpsTrip));
-      showToast("経由地を記録しました（" + gpsTrip.waypoints.length + "件目）");
+      showToast(matchedName ? ("経由地を記録しました：" + matchedName) : ("経由地を記録しました（" + gpsTrip.waypoints.length + "件目）"));
     };
 
     if(state.settings.gmapsKey){
       try{
+        showToast("登録済みの場所と照合中...");
+        const nearest = await findNearestKnownPlace(lat, lng);
+        if(nearest){
+          matchedName = nearest.name;
+          addr = nearest.addr;
+          finalize();
+          return;
+        }
         await loadGoogleMapsApi();
         new google.maps.Geocoder().geocode({ location: { lat, lng } }, (results, status)=>{
           if(status === "OK" && results[0]) addr = results[0].formatted_address;
@@ -1996,7 +2026,8 @@ async function finishGpsTrip(){
     document.getElementById('f_endTime').value = endTimeStr;
     document.getElementById('waypointsWrap').innerHTML = "";
     finishedTrip.waypoints.forEach((w, i)=>{
-      addWaypoint("経由地" + (i+1) + "（GPS）", w.addr, w.time);
+      const placeName = w.place || ("経由地" + (i+1) + "（GPS）");
+      addWaypoint(placeName, w.addr, w.time);
     });
 
     showToast("GPS運行の記録が終わりました。内容を確認して保存してください");
@@ -2672,16 +2703,4 @@ function executeRangePrint(){
     .filter(t=> t.date >= from && t.date <= to)
     .sort((a,b)=>{
       const ak = a.date+(a.startTime||"");
-      const bk = b.date+(b.startTime||"");
-      return ak < bk ? -1 : 1;
-    });
-  if(trips.length===0){ showToast("この期間の記録がありません"); return; }
-  closePrintRange();
-  printTripsTable(trips, from===to ? (fmtDate(from) + " の日報") : (from + " 〜 " + to + " の運行記録"), printRangeMode==='continuous');
-}
-
-loadState();
-checkGpsDraftOnLoad();
-</script>
-</body>
-</html>
+  
