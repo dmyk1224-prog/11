@@ -2070,11 +2070,16 @@ function buildTripFromForm(date){
 
   const waypoints = [];
   document.querySelectorAll('#waypointsWrap .waypoint-block').forEach(block=>{
-    const place = block.querySelector('.wp-place').value.trim();
+    const placeInput = block.querySelector('.wp-place');
+    let place = placeInput.value.trim();
     const addr = block.querySelector('.wp-addr').value.trim();
     const arrival = block.querySelector('.wp-arrival').value;
     const legDistRaw = block.querySelector('.wp-legdist').value;
     const legDistance = legDistRaw !== "" ? Number(legDistRaw) : null;
+    if(!place && addr){
+      place = "経由地";
+      placeInput.value = place;
+    }
     if(place) waypoints.push({place, addr, arrival, legDistance});
   });
 
@@ -2160,7 +2165,7 @@ async function commitTrip(trip){
   let changed = false;
   [{name:trip.startPlace, addr:trip.startAddr}, {name:trip.endPlace, addr:trip.endAddr}, ...trip.waypoints.map(w=>({name:w.place, addr:w.addr}))]
     .forEach(p=>{
-      if(p.name && !state.places.find(x=>x.name===p.name)){
+      if(p.name && p.name !== "経由地" && !state.places.find(x=>x.name===p.name)){
         const maxOrder = state.places.reduce((m,x)=> Math.max(m, x.order||0), -1);
         state.places.push({name:p.name, addr:p.addr||"", order: maxOrder+1, updatedAt: Date.now()});
         changed = true;
@@ -2191,7 +2196,7 @@ async function commitTripSilent(trip){
   let changed = false;
   [{name:trip.startPlace, addr:trip.startAddr}, {name:trip.endPlace, addr:trip.endAddr}, ...trip.waypoints.map(w=>({name:w.place, addr:w.addr}))]
     .forEach(p=>{
-      if(p.name && !state.places.find(x=>x.name===p.name)){
+      if(p.name && p.name !== "経由地" && !state.places.find(x=>x.name===p.name)){
         const maxOrder = state.places.reduce((m,x)=> Math.max(m, x.order||0), -1);
         state.places.push({name:p.name, addr:p.addr||"", order: maxOrder+1, updatedAt: Date.now()});
         changed = true;
