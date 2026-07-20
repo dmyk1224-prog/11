@@ -469,7 +469,6 @@
   ::placeholder{ color:#a9a596; }
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/4.1.1/tesseract.min.js"></script>
 </head>
 <body>
 <div class="bg-texture"></div>
@@ -478,6 +477,7 @@
   <div class="head-top">
     <div>
       <p class="head-title">運転日報</p>
+      <p class="head-sub" id="companyLabel" style="display:none;"></p>
       <p class="head-sub" id="todayLabel">-</p>
     </div>
     <button class="gear-btn" onclick="openSettings()">⚙</button>
@@ -584,7 +584,6 @@
           <input type="text" id="f_startPlace" list="placesDatalist" oninput="autofillAddr('startPlace')" placeholder="事務所">
           <button type="button" class="clear-x-btn" onclick="clearInput('f_startPlace')">✕</button>
         </div>
-        <button type="button" class="map-icon-btn" onclick="startVoiceInput('f_startPlace', this, false)">🎤</button>
       </div>
     </div>
     <div class="field">
@@ -598,8 +597,6 @@
           <button type="button" class="map-icon-btn" onclick="openMapForField('startAddr','startPlace')" title="地図で見る">🗺️</button>
           <button type="button" class="map-icon-btn" onclick="fetchGpsAddressInto(document.getElementById('f_startAddr'), this)" title="現在地から取得">📍</button>
           <button type="button" class="map-icon-btn" onclick="openMapPicker('f_startAddr')" title="地図で位置を指定">📌</button>
-          <button type="button" class="map-icon-btn" onclick="startVoiceInput('f_startAddr', this, true)" title="音声入力（Google Mapsで住所化）">🎤</button>
-          <button type="button" class="map-icon-btn" onclick="triggerCameraOcr('f_startAddr', this)" title="カメラで読み取り">📷</button>
         </div>
       </div>
     </div>
@@ -616,7 +613,6 @@
           <input type="text" id="f_endPlace" list="placesDatalist" oninput="autofillAddr('endPlace')" placeholder="事務所">
           <button type="button" class="clear-x-btn" onclick="clearInput('f_endPlace')">✕</button>
         </div>
-        <button type="button" class="map-icon-btn" onclick="startVoiceInput('f_endPlace', this, false)">🎤</button>
       </div>
     </div>
     <div class="field">
@@ -630,8 +626,6 @@
           <button type="button" class="map-icon-btn" onclick="openMapForField('endAddr','endPlace')" title="地図で見る">🗺️</button>
           <button type="button" class="map-icon-btn" onclick="fetchGpsAddressInto(document.getElementById('f_endAddr'), this)" title="現在地から取得">📍</button>
           <button type="button" class="map-icon-btn" onclick="openMapPicker('f_endAddr')" title="地図で位置を指定">📌</button>
-          <button type="button" class="map-icon-btn" onclick="startVoiceInput('f_endAddr', this, true)" title="音声入力（Google Mapsで住所化）">🎤</button>
-          <button type="button" class="map-icon-btn" onclick="triggerCameraOcr('f_endAddr', this)" title="カメラで読み取り">📷</button>
         </div>
       </div>
     </div>
@@ -656,7 +650,8 @@
       </div>
     </div>
 
-    <button class="mini-btn" style="width:100%; margin-bottom:14px;" onclick="autoCalcDistance()">🚗 地図から距離を自動計算</button>
+    <button class="mini-btn" style="width:100%; margin-bottom:10px;" onclick="autoCalcDistance()">🚗 地図から距離を自動計算</button>
+    <button class="mini-btn" style="width:100%; margin-bottom:14px;" onclick="startRouteNavigation()">🧭 このルートでナビを起動</button>
 
     <div class="calc-distance">
       <span>実走行距離</span>
@@ -687,6 +682,10 @@
     </div>
 
     <div id="settingsBasic">
+      <div class="field">
+        <label>会社名</label>
+        <input type="text" id="s_companyName">
+      </div>
       <div class="field">
         <label>運転者名</label>
         <input type="text" id="s_driver">
@@ -767,7 +766,7 @@
       <button class="mini-btn" style="width:100%; margin-top:8px;" onclick="manualSync()">今すぐ同期する</button>
       <div id="cloudStatus" class="odo-hint" style="margin-top:10px;"></div>
     </div>
-    <div style="text-align:center; font-size:10.5px; color:var(--ink-soft); margin-top:20px; opacity:0.6;">app version: 2026-07-19-r3</div>
+    <div style="text-align:center; font-size:10.5px; color:var(--ink-soft); margin-top:20px; opacity:0.6;">app version: 2026-07-20-r4</div>
   </div>
 </div>
 
@@ -865,7 +864,7 @@ const DEFAULT_PLACES = [
 const STORAGE_KEY = "unten-nippo-data-v1";
 
 let state = {
-  settings: { driver: "榑林大輔", car: "浜松り497", officeName: "事務所", officeAddr: "御前崎市池新田3349", gasUrl: "", theme: "sunny", gmapsKey: "" },
+  settings: { companyName: "", driver: "榑林大輔", car: "浜松り497", officeName: "事務所", officeAddr: "御前崎市池新田3349", gasUrl: "", theme: "sunny", gmapsKey: "" },
   places: DEFAULT_PLACES.slice(),
   deletedPlaces: [],
   trips: [],
@@ -1088,6 +1087,13 @@ function showToast(msg){
 /* ---------- Rendering ---------- */
 function render(){
   applyTheme(state.settings.theme || "sunny");
+  const companyLabel = document.getElementById('companyLabel');
+  if(state.settings.companyName){
+    companyLabel.textContent = state.settings.companyName;
+    companyLabel.style.display = "block";
+  } else {
+    companyLabel.style.display = "none";
+  }
   document.getElementById('chipDriver').textContent = state.settings.driver || "-";
   document.getElementById('chipCar').textContent = state.settings.car || "-";
   const now = new Date();
@@ -1316,7 +1322,6 @@ function addWaypoint(place, addr, arrival, legDistance){
           <input type="text" class="wp-place" id="${placeId}" list="placesDatalist" value="${escapeHtml(place||"")}" oninput="autofillWaypoint(this)">
           <button type="button" class="clear-x-btn" onclick="clearInput('${placeId}')">✕</button>
         </div>
-        <button type="button" class="map-icon-btn" onclick="startVoiceInput('${placeId}', this, false)">🎤</button>
       </div>
     </div>
     <div class="field">
@@ -1330,8 +1335,6 @@ function addWaypoint(place, addr, arrival, legDistance){
           <button type="button" class="map-icon-btn" onclick="openMapForWaypoint(this)" title="地図で見る">🗺️</button>
           <button type="button" class="map-icon-btn" onclick="fetchGpsAddressInto(this.closest('.waypoint-block').querySelector('.wp-addr'), this)" title="現在地から取得">📍</button>
           <button type="button" class="map-icon-btn" onclick="openMapPicker('${addrId}')" title="地図で位置を指定">📌</button>
-          <button type="button" class="map-icon-btn" onclick="startVoiceInput('${addrId}', this, true)" title="音声入力（Google Mapsで住所化）">🎤</button>
-          <button type="button" class="map-icon-btn" onclick="triggerCameraOcr('${addrId}', this)" title="カメラで読み取り">📷</button>
         </div>
       </div>
     </div>
@@ -1433,6 +1436,22 @@ function collectRouteAddresses(){
     if(loc) waypoints.push(loc);
   });
   return { origin, destination, waypoints };
+}
+
+function startRouteNavigation(){
+  const { origin, destination, waypoints } = collectRouteAddresses();
+  if(!origin || !destination){
+    showToast("出発地と到着地の住所（または場所名）を入力してください");
+    return;
+  }
+  let url = "https://www.google.com/maps/dir/?api=1" +
+    "&origin=" + encodeURIComponent(origin) +
+    "&destination=" + encodeURIComponent(destination) +
+    "&travelmode=driving";
+  if(waypoints.length > 0){
+    url += "&waypoints=" + encodeURIComponent(waypoints.join("|"));
+  }
+  window.open(url, "_blank");
 }
 
 async function autoCalcDistance(){
@@ -1553,19 +1572,23 @@ async function fetchGpsAddressInto(inputEl, btn){
   const originalText = btn.textContent;
   btn.disabled = true;
   btn.textContent = "…";
-  showToast("現在地を測定中...（数秒かかります）");
+  showToast("現在地を測定中...（最大15秒ほどかかります。屋外の方が精度が上がります）");
 
   const restoreBtn = ()=>{ btn.disabled = false; btn.textContent = originalText; };
 
   try{
-    const pos = await getBestPosition(8000);
+    const pos = await getBestPosition(15000);
     const lat = pos.coords.latitude;
     const lng = pos.coords.longitude;
-    const accuracyNote = pos.coords.accuracy ? "（誤差約" + Math.round(pos.coords.accuracy) + "m）" : "";
+    const acc = Math.round(pos.coords.accuracy || 0);
+    const accuracyNote = pos.coords.accuracy ? "（誤差約" + acc + "m）" : "";
+    const poorAccuracyWarning = acc > 50
+      ? "\n⚠️ 精度が低い可能性があります。屋内・PC・Wi-Fiのみでの位置情報は誤差が大きくなります。必要なら📌地図で位置を指定して手動で合わせてください。"
+      : "";
 
     if(!state.settings.gmapsKey){
       inputEl.value = lat.toFixed(6) + ", " + lng.toFixed(6);
-      showToast("現在地を取得しました" + accuracyNote + "（住所への変換にはGoogle MapsのAPIキーが必要です）");
+      showToast("現在地を取得しました" + accuracyNote + "（住所への変換にはGoogle MapsのAPIキーが必要です）" + poorAccuracyWarning);
       restoreBtn();
       return;
     }
@@ -1576,7 +1599,7 @@ async function fetchGpsAddressInto(inputEl, btn){
       restoreBtn();
       if(status === "OK" && results && results[0]){
         inputEl.value = results[0].formatted_address;
-        showToast("現在地の住所を取得しました" + accuracyNote);
+        showToast("現在地の住所を取得しました" + accuracyNote + poorAccuracyWarning);
       } else {
         inputEl.value = lat.toFixed(6) + ", " + lng.toFixed(6);
         showToast("住所への変換に失敗しました（座標を入力しました）");
@@ -1613,106 +1636,6 @@ function clearInput(targetId, afterClearCallback){
   el.dispatchEvent(new Event('input'));
   if(typeof afterClearCallback === 'function') afterClearCallback();
   el.focus();
-}
-
-async function normalizeAddressText(text){
-  if(!state.settings.gmapsKey) return text;
-  try{
-    await loadGoogleMapsApi();
-    return await new Promise((resolve)=>{
-      new google.maps.Geocoder().geocode({ address: text }, (results, status)=>{
-        if(status === "OK" && results && results[0]){
-          resolve(results[0].formatted_address);
-        } else {
-          resolve(text);
-        }
-      });
-    });
-  }catch(e){
-    return text;
-  }
-}
-
-function startVoiceInput(targetId, btn, isAddress){
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if(!SpeechRecognition){
-    showToast("この端末・ブラウザは音声入力に対応していません");
-    return;
-  }
-  const recog = new SpeechRecognition();
-  recog.lang = 'ja-JP';
-  recog.interimResults = false;
-  recog.maxAlternatives = 1;
-
-  if(btn) btn.classList.add('recording');
-  showToast("話してください...");
-
-  recog.onresult = async (e)=>{
-    const rawText = e.results[0][0].transcript;
-    const el = document.getElementById(targetId);
-    if(!el) return;
-
-    if(isAddress && state.settings.gmapsKey){
-      showToast("Google Mapsで住所を確認中...");
-      const normalized = await normalizeAddressText(rawText);
-      el.value = normalized;
-      el.dispatchEvent(new Event('input'));
-      showToast("住所を認識しました：" + normalized);
-    } else {
-      el.value = rawText;
-      el.dispatchEvent(new Event('input'));
-      showToast("音声を認識しました：" + rawText);
-    }
-  };
-  recog.onerror = ()=>{
-    showToast("音声を認識できませんでした");
-  };
-  recog.onend = ()=>{
-    if(btn) btn.classList.remove('recording');
-  };
-  try{
-    recog.start();
-  }catch(e){
-    if(btn) btn.classList.remove('recording');
-    showToast("音声入力を開始できませんでした");
-  }
-}
-
-/* ---------- Camera OCR (address reading) ---------- */
-function triggerCameraOcr(targetId, btn){
-  if(typeof Tesseract === 'undefined'){
-    showToast("読み取り機能の読み込みに失敗しました。通信環境をご確認ください");
-    return;
-  }
-  const input = document.createElement('input');
-  input.type = 'file';
-  input.accept = 'image/*';
-  input.capture = 'environment';
-  input.style.display = 'none';
-
-  input.onchange = async (e)=>{
-    const file = e.target.files[0];
-    input.remove();
-    if(!file) return;
-
-    showToast("住所を読み取り中...（数十秒かかることがあります）");
-    try{
-      const result = await Tesseract.recognize(file, 'jpn');
-      const cleaned = (result.data.text || "").replace(/\s+/g, '').trim();
-      if(cleaned){
-        const el = document.getElementById(targetId);
-        el.value = cleaned;
-        showToast("読み取りました。内容を確認・修正してください");
-      } else {
-        showToast("文字を読み取れませんでした。手入力をお願いします");
-      }
-    }catch(err){
-      console.error(err);
-      showToast("読み取りに失敗しました");
-    }
-  };
-  document.body.appendChild(input);
-  input.click();
 }
 
 /* ---------- Map location picker ---------- */
@@ -2133,6 +2056,7 @@ async function deleteCurrentTrip(){
 
 /* ---------- Settings ---------- */
 function openSettings(){
+  document.getElementById('s_companyName').value = state.settings.companyName || "";
   document.getElementById('s_driver').value = state.settings.driver || "";
   document.getElementById('s_car').value = state.settings.car || "";
   document.getElementById('s_officeName').value = state.settings.officeName || "";
@@ -2403,6 +2327,7 @@ async function importFromExcel(evt){
 }
 
 async function saveSettings(){
+  state.settings.companyName = document.getElementById('s_companyName').value.trim();
   state.settings.driver = document.getElementById('s_driver').value.trim();
   state.settings.car = document.getElementById('s_car').value.trim();
   state.settings.officeName = document.getElementById('s_officeName').value.trim();
@@ -2487,6 +2412,9 @@ function printTripsTable(trips, titleText, continuous){
   const dates = Object.keys(byDate).sort();
 
   let html = '<div class="print-title">運　転　日　報</div>';
+  if(state.settings.companyName){
+    html += '<div style="text-align:center; font-size:13px; margin-bottom:8px;">' + escapeHtml(state.settings.companyName) + '</div>';
+  }
   html += '<div class="print-meta"><span>' + escapeHtml(titleText) + '</span><span>運転者：' +
     escapeHtml(state.settings.driver||"") + '　車両番号：' + escapeHtml(state.settings.car||"") + '</span></div>';
 
