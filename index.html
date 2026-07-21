@@ -1580,7 +1580,8 @@ function startTripNavigation(tripId){
   window.open(url, "_blank");
 }
 
-function autoCalcDistance(){
+function autoCalcDistance(updateTimes){
+  if(updateTimes === undefined) updateTimes = true;
   return new Promise((resolve)=>{
     if(!state.settings.gmapsKey){
       showToast("先に⚙設定→地図でGoogle MapsのAPIキーを設定してください");
@@ -1622,6 +1623,12 @@ function autoCalcDistance(){
               if(legLabel) legLabel.textContent = "この区間の距離：" + legKm.toLocaleString() + " km";
             }
           });
+
+          if(!updateTimes){
+            showToast("地図から距離・区間距離を計算しました（" + km + " km）。記録済みの実際の時刻は変更していません");
+            resolve(status === "OK");
+            return;
+          }
 
           const startTimeVal = document.getElementById('f_startTime').value;
           if(startTimeVal){
@@ -1872,6 +1879,8 @@ let pendingGpsPath = null;
 
 function startGpsWatch(){
   gpsWatchId = navigator.geolocation.watchPosition((p)=>{
+    // 精度が悪い（誤差が大きい）測位は軌跡を歪ませるので採用しない
+    if(p.coords.accuracy && p.coords.accuracy > 100) return;
     const last = gpsTrip.path[gpsTrip.path.length - 1];
     const d = haversineKm(last.lat, last.lng, p.coords.latitude, p.coords.longitude);
     if(d > 0.05){
@@ -1905,6 +1914,34 @@ function renderGpsWaypointStrip(){
   strip.style.display = "flex";
 }
 
+/* ---------- Screen Wake Lock (画面が消えて追跡が止まるのを防ぐ) ---------- */
+let wakeLockSentinel = null;
+
+async function acquireWakeLock(){
+  try{
+    if('wakeLock' in navigator){
+      wakeLockSentinel = await navigator.wakeLock.request('screen');
+    }
+  }catch(e){
+    console.log("画面スリープ防止を有効にできませんでした", e);
+  }
+}
+
+async function releaseWakeLock(){
+  try{
+    if(wakeLockSentinel){
+      await wakeLockSentinel.release();
+      wakeLockSentinel = null;
+    }
+  }catch(e){}
+}
+
+document.addEventListener('visibilitychange', async ()=>{
+  if(document.visibilityState === 'visible' && gpsTrip && gpsTrip.active && !wakeLockSentinel){
+    await acquireWakeLock();
+  }
+});
+
 async function startGpsTrip(){
   if(!navigator.geolocation){ showToast("この端末では位置情報が使えません"); return; }
   if(gpsTrip && gpsTrip.active){ showToast("すでにGPS運行を記録中です"); return; }
@@ -1921,6 +1958,7 @@ async function startGpsTrip(){
     };
     localStorage.setItem('gps-trip-draft', JSON.stringify(gpsTrip));
     startGpsWatch();
+    acquireWakeLock();
     document.getElementById('gpsTrackBar').style.display = "block";
     renderGpsWaypointStrip();
     gpsTimerId = setInterval(updateGpsElapsed, 1000);
@@ -2015,6 +2053,7 @@ async function addGpsWaypoint(){
 function discardGpsTrip(){
   if(gpsWatchId != null) navigator.geolocation.clearWatch(gpsWatchId);
   clearInterval(gpsTimerId);
+  releaseWakeLock();
   gpsTrip = null;
   localStorage.removeItem('gps-trip-draft');
   document.getElementById('gpsTrackBar').style.display = "none";
@@ -2032,6 +2071,7 @@ async function finishGpsTrip(){
 
     if(gpsWatchId != null) navigator.geolocation.clearWatch(gpsWatchId);
     clearInterval(gpsTimerId);
+    releaseWakeLock();
     document.getElementById('gpsTrackBar').style.display = "none";
 
     const finishedTrip = gpsTrip;
@@ -2061,7 +2101,7 @@ async function finishGpsTrip(){
 
     if(state.settings.gmapsKey){
       showToast("GPS運行を保存しました。地図から正確な距離を計算しています…");
-      await autoCalcDistance();
+      await autoCalcDistance(false);
       await saveGpsTripNow();
       showToast("正確な距離を計算して保存しました");
     } else {
@@ -2089,6 +2129,7 @@ function checkGpsDraftOnLoad(){
     gpsTrip = JSON.parse(raw);
     if(!navigator.geolocation) return;
     startGpsWatch();
+    acquireWakeLock();
     document.getElementById('gpsTrackBar').style.display = "block";
     renderGpsWaypointStrip();
     gpsTimerId = setInterval(updateGpsElapsed, 1000);
