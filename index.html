@@ -2152,22 +2152,65 @@ function buildStaticMapUrl(path, width, height){
   return url;
 }
 
+let currentTrajectoryTripId = null;
+
 function viewTrajectory(tripId){
   const t = state.trips.find(x=>x.id===tripId);
   if(!t || !t.gpsPath || t.gpsPath.length===0){ showToast("この記録には走行軌跡がありません"); return; }
   if(!state.settings.gmapsKey){ showToast("走行軌跡の表示にはGoogle MapsのAPIキーが必要です（Maps Static APIも有効にしてください）"); return; }
+  currentTrajectoryTripId = tripId;
   document.getElementById('trajectoryImg').src = buildStaticMapUrl(t.gpsPath, 640, 640);
   document.getElementById('trajectoryOverlay').style.display = "flex";
 }
 
 function closeTrajectory(){
   document.getElementById('trajectoryOverlay').style.display = "none";
+  currentTrajectoryTripId = null;
 }
 
 function printTrajectory(){
   const img = document.getElementById('trajectoryImg');
-  document.getElementById('printSheet').innerHTML =
-    '<div class="print-title">走行軌跡</div><img src="' + img.src + '" style="width:100%; max-width:600px; display:block; margin:0 auto;">';
+  const t = state.trips.find(x=>x.id===currentTrajectoryTripId);
+
+  let html = '<div class="print-title">走行軌跡</div>';
+
+  if(t){
+    if(state.settings.companyName){
+      html += '<div style="text-align:center; font-size:13px; margin-bottom:8px;">' + escapeHtml(state.settings.companyName) + '</div>';
+    }
+
+    const monthTrips = state.trips.filter(x=> x.date && x.date.slice(0,7)===t.date.slice(0,7));
+    const noMap = computeDayNumbers(monthTrips);
+    const no = noMap[t.id];
+
+    html += '<div class="print-meta"><span>' + fmtDateFull(t.date) + (no ? '（No.' + no + '）' : '') + '</span><span>運転者：' +
+      escapeHtml(state.settings.driver||"") + '　車両番号：' + escapeHtml(state.settings.car||"") + '</span></div>';
+
+    const wpText = (t.waypoints||[]).map(w=>{
+      let line = escapeHtml(w.place||"");
+      const extra = [];
+      if(w.legDistance!=null && w.legDistance!=="") extra.push(Number(w.legDistance).toLocaleString()+"km");
+      if(w.arrival) extra.push(escapeHtml(w.arrival)+"着");
+      if(extra.length>0) line += " (" + extra.join(" ") + ")";
+      return line;
+    }).join("<br>＞ ");
+
+    const startInfo = escapeHtml(t.startPlace||"") +
+      '<br><span style="font-size:11px;color:#555;">' + escapeHtml(t.startTime||"--:--") +
+      (t.startOdo!=null ? " ("+t.startOdo.toLocaleString()+"km)" : "") + '</span>';
+    const endInfo = escapeHtml(t.endPlace||"") +
+      '<br><span style="font-size:11px;color:#555;">' + escapeHtml(t.endTime||"--:--") +
+      (t.endOdo!=null ? " ("+t.endOdo.toLocaleString()+"km)" : "") + '</span>';
+
+    html += '<table class="print-table"><thead><tr><th>出発</th><th>経由地</th><th>到着</th><th>距離</th><th>備考</th></tr></thead><tbody>';
+    html += '<tr><td>' + startInfo + '</td><td>' + (wpText||"-") + '</td><td>' + endInfo +
+      '</td><td><b>' + (typeof t.distance==='number' ? t.distance.toLocaleString() : "-") + ' km</b></td><td>' + escapeHtml(t.note||"") + '</td></tr>';
+    html += '</tbody></table>';
+  }
+
+  html += '<div style="margin-top:16px;"><img src="' + img.src + '" style="width:100%; max-width:600px; display:block; margin:0 auto;"></div>';
+
+  document.getElementById('printSheet').innerHTML = html;
   try{ window.print(); }catch(e){ showToast("この画面では印刷できませんでした"); }
 }
 
