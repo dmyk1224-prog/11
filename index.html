@@ -454,6 +454,9 @@
   @media print{
     body *{ visibility:hidden; }
     #printSheet, #printSheet *{ visibility:visible; }
+    .bg-texture, header.app-head, main, #gpsTrackBar, .fab, #toast, .overlay{
+      display:none !important;
+    }
     #printSheet{
       display:block !important;
       position:absolute; top:0; left:0; width:100%;
@@ -1350,6 +1353,25 @@ function closeTripForm(){
 }
 
 let wpUidCounter = 0;
+
+async function removeWaypointBlock(btn){
+  btn.closest('.waypoint-block').remove();
+  // 経由地を削除すると、残りの経由地の「区間距離」は前後の対応がずれて不正確になるため一旦クリアする
+  document.querySelectorAll('#waypointsWrap .waypoint-block').forEach(block=>{
+    const legInput = block.querySelector('.wp-legdist');
+    const legLabel = block.querySelector('.wp-legdist-label');
+    if(legInput) legInput.value = "";
+    if(legLabel) legLabel.textContent = "";
+  });
+
+  if(state.settings.gmapsKey){
+    showToast("経由地を削除しました。区間距離を再計算しています…");
+    await autoCalcDistance(false); // 到着時刻（実際に記録した時刻）は上書きせず、距離だけ再計算する
+  } else {
+    showToast("経由地を削除しました。区間距離は「🚗 地図から距離を自動計算」で再計算してください");
+  }
+}
+
 function addWaypoint(place, addr, arrival, legDistance){
   const wrap = document.getElementById('waypointsWrap');
   if(wrap.children.length >= 5){ showToast("経由地は最大5件までです"); return; }
@@ -1360,7 +1382,7 @@ function addWaypoint(place, addr, arrival, legDistance){
   const block = document.createElement('div');
   block.className = "waypoint-block";
   block.innerHTML = `
-    <button class="wp-remove" onclick="this.parentElement.remove()">✕ 削除</button>
+    <button class="wp-remove" onclick="removeWaypointBlock(this)">✕ 削除</button>
     <div class="field">
       <label>経由地 ${idx+1}</label>
       <div class="place-row">
