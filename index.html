@@ -452,6 +452,7 @@
   /* Print sheet */
   #printSheet{ display:none; }
   @media print{
+    body{ min-height:0 !important; height:auto !important; padding-bottom:0 !important; }
     body *{ visibility:hidden; }
     #printSheet, #printSheet *{ visibility:visible; }
     .bg-texture, header.app-head, main, #gpsTrackBar, .fab, #toast, .overlay{
