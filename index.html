@@ -1070,6 +1070,13 @@ async function pullFromCloud(silent){
       state.places = sortPlacesByOrder(applyPlaceTombstones(mergedPlaces, mergedDeletedPlaces));
       state.deletedPlaces = mergedDeletedPlaces;
 
+      // 設定（Google MapsのAPIキー・運転者名・車両番号など）もクラウドから取り込む
+      // ただしクラウド同期用URL自体は、今まさにこの画面に入力されている値を優先して上書きしない
+      if(cloud.settings){
+        const keepGasUrl = state.settings.gasUrl;
+        state.settings = Object.assign({}, state.settings, cloud.settings, { gasUrl: keepGasUrl });
+      }
+
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
       render();
       if(!silent) showToast("クラウドと同期しました（クラウド側 " + cloud.trips.length + " 件）");
