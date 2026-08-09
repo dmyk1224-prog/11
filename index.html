@@ -1944,16 +1944,42 @@ let gpsTimerId = null;
 let gpsNotifyTimerId = null;
 let pendingGpsPath = null;
 
+function isNativeWrapper(){
+  return !!(window.AndroidLocationBridge && window.AndroidLocationBridge.isNative && window.AndroidLocationBridge.isNative());
+}
+
+function acceptGpsPoint(lat, lng, accuracy){
+  if(!gpsTrip || !gpsTrip.active) return;
+  if(accuracy && accuracy > 100) return;
+  const last = gpsTrip.path[gpsTrip.path.length - 1];
+  if(!last){
+    gpsTrip.path.push({ lat, lng });
+    localStorage.setItem('gps-trip-draft', JSON.stringify(gpsTrip));
+    return;
+  }
+  const d = haversineKm(last.lat, last.lng, lat, lng);
+  if(d > 0.05){
+    gpsTrip.path.push({ lat, lng });
+    localStorage.setItem('gps-trip-draft', JSON.stringify(gpsTrip));
+  }
+}
+
+// ネイティブAndroidアプリ（フォアグラウンドサービス）から位置情報が届いた時の受け口
+window.onNativeLocationUpdate = function(lat, lng, accuracy){
+  acceptGpsPoint(lat, lng, accuracy);
+};
+window.onNativeLocationBatch = function(points){
+  try{ (points||[]).forEach(p=> acceptGpsPoint(p.lat, p.lng, p.accuracy)); }catch(e){}
+};
+
 function startGpsWatch(){
+  if(isNativeWrapper()){
+    // 画面ロック中も止まらないよう、ネイティブ側のフォアグラウンドサービスに測位を任せる
+    try{ window.AndroidLocationBridge.startTracking(); }catch(e){}
+    return;
+  }
   gpsWatchId = navigator.geolocation.watchPosition((p)=>{
-    // 精度が悪い（誤差が大きい）測位は軌跡を歪ませるので採用しない
-    if(p.coords.accuracy && p.coords.accuracy > 100) return;
-    const last = gpsTrip.path[gpsTrip.path.length - 1];
-    const d = haversineKm(last.lat, last.lng, p.coords.latitude, p.coords.longitude);
-    if(d > 0.05){
-      gpsTrip.path.push({ lat: p.coords.latitude, lng: p.coords.longitude });
-      localStorage.setItem('gps-trip-draft', JSON.stringify(gpsTrip));
-    }
+    acceptGpsPoint(p.coords.latitude, p.coords.longitude, p.coords.accuracy);
   }, ()=>{}, { enableHighAccuracy: true, maximumAge: 10000, timeout: 20000 });
 }
 
@@ -2030,8 +2056,10 @@ async function startGpsTrip(){
     renderGpsWaypointStrip();
     gpsTimerId = setInterval(updateGpsElapsed, 1000);
     updateGpsElapsed();
-    ensureNotificationPermission().then(ok=>{ if(ok) updateGpsNotification(); });
-    gpsNotifyTimerId = setInterval(updateGpsNotification, 30000);
+    if(!isNativeWrapper()){
+      ensureNotificationPermission().then(ok=>{ if(ok) updateGpsNotification(); });
+      gpsNotifyTimerId = setInterval(updateGpsNotification, 30000);
+    }
     showToast("GPS運行の記録を開始しました");
   }catch(err){
     showToast(geoErrorMessage(err));
@@ -2122,6 +2150,7 @@ async function addGpsWaypoint(){
 
 function discardGpsTrip(){
   if(gpsWatchId != null) navigator.geolocation.clearWatch(gpsWatchId);
+  if(isNativeWrapper()){ try{ window.AndroidLocationBridge.stopTracking(); }catch(e){} }
   clearInterval(gpsTimerId);
   clearInterval(gpsNotifyTimerId);
   releaseWakeLock();
@@ -2142,6 +2171,7 @@ async function finishGpsTrip(){
     const endTimeStr = nowHHMM();
 
     if(gpsWatchId != null) navigator.geolocation.clearWatch(gpsWatchId);
+    if(isNativeWrapper()){ try{ window.AndroidLocationBridge.stopTracking(); }catch(e){} }
     clearInterval(gpsTimerId);
     clearInterval(gpsNotifyTimerId);
     releaseWakeLock();
@@ -2208,8 +2238,10 @@ function checkGpsDraftOnLoad(){
     renderGpsWaypointStrip();
     gpsTimerId = setInterval(updateGpsElapsed, 1000);
     updateGpsElapsed();
-    if(typeof Notification !== 'undefined' && Notification.permission === 'granted') updateGpsNotification();
-    gpsNotifyTimerId = setInterval(updateGpsNotification, 30000);
+    if(!isNativeWrapper()){
+      if(typeof Notification !== 'undefined' && Notification.permission === 'granted') updateGpsNotification();
+      gpsNotifyTimerId = setInterval(updateGpsNotification, 30000);
+    }
     showToast("前回のGPS運行記録を再開しました");
   }catch(e){
     localStorage.removeItem('gps-trip-draft');
