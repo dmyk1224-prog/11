@@ -1897,8 +1897,51 @@ function nowHHMM(){
 }
 
 let gpsTrip = null;
+/* ---------- GPS運行中の通知 ---------- */
+async function ensureNotificationPermission(){
+  if(!('Notification' in window)) return false;
+  if(Notification.permission === 'granted') return true;
+  if(Notification.permission === 'denied') return false;
+  try{
+    const perm = await Notification.requestPermission();
+    return perm === 'granted';
+  }catch(e){ return false; }
+}
+
+async function updateGpsNotification(){
+  if(!gpsTrip || !gpsTrip.active) return;
+  if(!('Notification' in window) || Notification.permission !== 'granted') return;
+  if(!('serviceWorker' in navigator)) return;
+  try{
+    const reg = await navigator.serviceWorker.ready;
+    const sec = Math.floor((Date.now() - gpsTrip.startTimestamp) / 1000);
+    const hh = Math.floor(sec/3600), mm = Math.floor((sec%3600)/60);
+    const elapsedStr = pad(hh) + ":" + pad(mm);
+    const wpCount = (gpsTrip.waypoints||[]).length;
+    await reg.showNotification("🔴 GPS運行記録中", {
+      body: "経過時間 " + elapsedStr + "　経由地 " + wpCount + "件\nアプリを開いたまま運転してください（画面ロック中は記録が止まります）",
+      tag: "gps-trip",
+      renotify: false,
+      silent: true,
+      icon: "icon-192.png",
+      badge: "icon-192.png",
+      requireInteraction: true
+    });
+  }catch(e){ console.log("通知の表示に失敗しました", e); }
+}
+
+async function closeGpsNotification(){
+  if(!('serviceWorker' in navigator)) return;
+  try{
+    const reg = await navigator.serviceWorker.ready;
+    const notifs = await reg.getNotifications({ tag: "gps-trip" });
+    notifs.forEach(n=> n.close());
+  }catch(e){}
+}
+
 let gpsWatchId = null;
 let gpsTimerId = null;
+let gpsNotifyTimerId = null;
 let pendingGpsPath = null;
 
 function startGpsWatch(){
@@ -1987,6 +2030,8 @@ async function startGpsTrip(){
     renderGpsWaypointStrip();
     gpsTimerId = setInterval(updateGpsElapsed, 1000);
     updateGpsElapsed();
+    ensureNotificationPermission().then(ok=>{ if(ok) updateGpsNotification(); });
+    gpsNotifyTimerId = setInterval(updateGpsNotification, 30000);
     showToast("GPS運行の記録を開始しました");
   }catch(err){
     showToast(geoErrorMessage(err));
@@ -2047,6 +2092,7 @@ async function addGpsWaypoint(){
       gpsTrip.path.push({ lat, lng });
       localStorage.setItem('gps-trip-draft', JSON.stringify(gpsTrip));
       renderGpsWaypointStrip();
+      updateGpsNotification();
       showToast(matchedName ? ("経由地を記録しました：" + matchedName) : ("経由地を記録しました（" + gpsTrip.waypoints.length + "件目）"));
     };
 
@@ -2077,7 +2123,9 @@ async function addGpsWaypoint(){
 function discardGpsTrip(){
   if(gpsWatchId != null) navigator.geolocation.clearWatch(gpsWatchId);
   clearInterval(gpsTimerId);
+  clearInterval(gpsNotifyTimerId);
   releaseWakeLock();
+  closeGpsNotification();
   gpsTrip = null;
   localStorage.removeItem('gps-trip-draft');
   document.getElementById('gpsTrackBar').style.display = "none";
@@ -2095,7 +2143,9 @@ async function finishGpsTrip(){
 
     if(gpsWatchId != null) navigator.geolocation.clearWatch(gpsWatchId);
     clearInterval(gpsTimerId);
+    clearInterval(gpsNotifyTimerId);
     releaseWakeLock();
+    closeGpsNotification();
     document.getElementById('gpsTrackBar').style.display = "none";
 
     const finishedTrip = gpsTrip;
@@ -2158,6 +2208,8 @@ function checkGpsDraftOnLoad(){
     renderGpsWaypointStrip();
     gpsTimerId = setInterval(updateGpsElapsed, 1000);
     updateGpsElapsed();
+    if(typeof Notification !== 'undefined' && Notification.permission === 'granted') updateGpsNotification();
+    gpsNotifyTimerId = setInterval(updateGpsNotification, 30000);
     showToast("前回のGPS運行記録を再開しました");
   }catch(e){
     localStorage.removeItem('gps-trip-draft');
