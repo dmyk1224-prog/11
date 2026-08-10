@@ -1955,6 +1955,16 @@ function isNativeWrapper(){
   return !!(window.AndroidLocationBridge && window.AndroidLocationBridge.isNative && window.AndroidLocationBridge.isNative());
 }
 
+if(isNativeWrapper() && window.AndroidLocationBridge.printPage){
+  // 標準のwindow.print()はWebView単体では動作しないため、Android側の印刷機能に差し替える
+  window.print = function(){
+    try{ window.AndroidLocationBridge.printPage(); }
+    catch(e){ showToast("印刷を開始できませんでした"); }
+  };
+}
+
+let lastNativeLocation = null;
+
 function acceptGpsPoint(lat, lng, accuracy){
   if(!gpsTrip || !gpsTrip.active) return;
   if(accuracy && accuracy > 100) return;
@@ -1973,11 +1983,28 @@ function acceptGpsPoint(lat, lng, accuracy){
 
 // ネイティブAndroidアプリ（フォアグラウンドサービス）から位置情報が届いた時の受け口
 window.onNativeLocationUpdate = function(lat, lng, accuracy){
+  lastNativeLocation = { lat, lng, accuracy, ts: Date.now() };
   acceptGpsPoint(lat, lng, accuracy);
 };
 window.onNativeLocationBatch = function(points){
-  try{ (points||[]).forEach(p=> acceptGpsPoint(p.lat, p.lng, p.accuracy)); }catch(e){}
+  try{
+    (points||[]).forEach(p=>{
+      lastNativeLocation = { lat: p.lat, lng: p.lng, accuracy: p.accuracy, ts: Date.now() };
+      acceptGpsPoint(p.lat, p.lng, p.accuracy);
+    });
+  }catch(e){}
 };
+
+// 経由地到着・帰着ボタン用：運行中はフォアグラウンドサービスが届けてくれた最新位置を優先して使う。
+// ボタンを押した瞬間にブラウザ側のGPSを別途取り直すと、ネイティブ側のサービスと競合して
+// タイムアウトすることがあるため、これを避ける。
+function getPositionForGpsAction(timeoutMs){
+  if(isNativeWrapper() && gpsTrip && gpsTrip.active && lastNativeLocation && (Date.now() - lastNativeLocation.ts) < 20000){
+    const loc = lastNativeLocation;
+    return Promise.resolve({ coords: { latitude: loc.lat, longitude: loc.lng, accuracy: loc.accuracy } });
+  }
+  return getBestPosition(timeoutMs);
+}
 
 function startGpsWatch(){
   if(isNativeWrapper()){
@@ -2117,7 +2144,7 @@ async function addGpsWaypoint(){
   if(!gpsTrip) return;
   showToast("現在地を測定中...");
   try{
-    const pos = await getBestPosition(8000);
+    const pos = await getPositionForGpsAction(8000);
     const lat = pos.coords.latitude, lng = pos.coords.longitude;
     let addr = lat.toFixed(6) + ", " + lng.toFixed(6);
     let matchedName = null;
@@ -2173,7 +2200,7 @@ async function finishGpsTrip(){
   if(!gpsTrip) return;
   showToast("現在地を測定中...");
   try{
-    const pos = await getBestPosition(8000);
+    const pos = await getPositionForGpsAction(8000);
     gpsTrip.path.push({ lat: pos.coords.latitude, lng: pos.coords.longitude });
     const endTimeStr = nowHHMM();
 
