@@ -1968,8 +1968,9 @@ function isNativeWrapper(){
 if(isNativeWrapper() && window.AndroidLocationBridge.printPage){
   // 標準のwindow.print()はWebView単体では動作しないため、Android側の印刷機能に差し替える
   window.print = function(){
+    showToast("印刷を準備しています…");
     try{ window.AndroidLocationBridge.printPage(); }
-    catch(e){ showToast("印刷を開始できませんでした"); }
+    catch(e){ showToast("印刷の呼び出しに失敗しました：" + e.message); }
   };
 }
 
