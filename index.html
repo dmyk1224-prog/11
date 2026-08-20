@@ -533,16 +533,18 @@
   <div id="tripList"></div>
 </main>
 
-<div id="gpsTrackBar" style="display:none; position:fixed; left:50%; top:50%; transform:translate(-50%, -50%); z-index:15; background:var(--navy); color:#f2ede0; box-shadow:0 10px 34px rgba(0,0,0,0.4); padding:18px 20px 20px; border-radius:22px; width:88%; max-width:420px;">
-  <div id="gpsWaypointStrip" style="display:none; gap:6px; padding-bottom:10px; overflow-x:auto; white-space:nowrap;"></div>
-  <div style="position:relative; text-align:center; margin-bottom:14px;">
-    <div style="font-size:11px; opacity:0.85;">🔴 GPS運行記録中</div>
-    <div id="gpsElapsed" style="font-size:22px; font-weight:800;">00:00:00</div>
-    <button style="position:absolute; right:0; top:2px; width:32px; height:32px; border-radius:50%; border:1px solid rgba(255,255,255,0.4); background:transparent; color:#fff; font-size:14px;" onclick="showConfirm('この運行記録を破棄します。よろしいですか？', discardGpsTrip, {confirmLabel:'破棄する', danger:true})">✕</button>
-  </div>
-  <div style="display:flex; gap:10px; max-width:480px; margin:0 auto;">
-    <button style="flex:1; background:#fff; color:var(--navy); border:none; padding:18px 0; border-radius:14px; font-size:16px; font-weight:700;" onclick="addGpsWaypoint()">📍 経由地到着</button>
-    <button style="flex:1; background:var(--danger); color:#fff; border:none; padding:18px 0; border-radius:14px; font-size:16px; font-weight:700;" onclick="finishGpsTrip()">🏁 帰着</button>
+<div id="gpsTrackBar" style="display:none; position:fixed; inset:0; z-index:15; background:var(--navy); color:#f2ede0;">
+  <button style="position:absolute; top:18px; right:18px; width:34px; height:34px; border-radius:50%; border:1px solid rgba(255,255,255,0.4); background:transparent; color:#fff; font-size:14px;" onclick="showConfirm('この運行記録を破棄します。よろしいですか？', discardGpsTrip, {confirmLabel:'破棄する', danger:true})">✕</button>
+  <div style="height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:26px; padding:24px; box-sizing:border-box;">
+    <div style="text-align:center;">
+      <div style="font-size:13px; opacity:0.85;">🔴 GPS運行記録中</div>
+      <div id="gpsElapsed" style="font-size:34px; font-weight:800;">00:00:00</div>
+    </div>
+    <div id="gpsWaypointStrip" style="display:none; gap:6px; overflow-x:auto; white-space:nowrap; max-width:92%; padding-bottom:2px;"></div>
+    <div style="display:flex; flex-direction:column; gap:14px; width:100%; max-width:320px;">
+      <button style="background:#fff; color:var(--navy); border:none; padding:18px 0; border-radius:14px; font-size:16px; font-weight:700;" onclick="addGpsWaypoint()">📍 経由地到着</button>
+      <button style="background:var(--danger); color:#fff; border:none; padding:18px 0; border-radius:14px; font-size:16px; font-weight:700;" onclick="finishGpsTrip()">🏁 帰着</button>
+    </div>
   </div>
 </div>
 
@@ -2151,43 +2153,52 @@ async function findNearestKnownPlace(lat, lng, thresholdKm){
   return (best && bestDist <= thresholdKm) ? best : null;
 }
 
+async function recordGpsWaypoint(lat, lng){
+  if(!gpsTrip) return;
+  let addr = lat.toFixed(6) + ", " + lng.toFixed(6);
+  let matchedName = null;
+
+  const finalize = ()=>{
+    gpsTrip.waypoints.push({ time: nowHHMM(), lat, lng, addr, place: matchedName });
+    gpsTrip.path.push({ lat, lng });
+    localStorage.setItem('gps-trip-draft', JSON.stringify(gpsTrip));
+    renderGpsWaypointStrip();
+    updateGpsNotification();
+    showToast(matchedName ? ("経由地を記録しました：" + matchedName) : ("経由地を記録しました（" + gpsTrip.waypoints.length + "件目）"));
+  };
+
+  if(state.settings.gmapsKey){
+    try{
+      showToast("登録済みの場所と照合中...");
+      const nearest = await findNearestKnownPlace(lat, lng);
+      if(nearest){
+        matchedName = nearest.name;
+        addr = nearest.addr;
+        finalize();
+        return;
+      }
+      await loadGoogleMapsApi();
+      new google.maps.Geocoder().geocode({ location: { lat, lng } }, (results, status)=>{
+        if(status === "OK" && results[0]) addr = results[0].formatted_address;
+        finalize();
+      });
+    }catch(e){ finalize(); }
+  } else {
+    finalize();
+  }
+}
+
+// 浮動ボタン（他アプリの上に重ねて表示）から経由地が記録された時の受け口
+window.onNativeWaypointCaptured = function(lat, lng){
+  recordGpsWaypoint(lat, lng);
+};
+
 async function addGpsWaypoint(){
   if(!gpsTrip) return;
   showToast("現在地を測定中...");
   try{
     const pos = await getPositionForGpsAction(8000);
-    const lat = pos.coords.latitude, lng = pos.coords.longitude;
-    let addr = lat.toFixed(6) + ", " + lng.toFixed(6);
-    let matchedName = null;
-
-    const finalize = ()=>{
-      gpsTrip.waypoints.push({ time: nowHHMM(), lat, lng, addr, place: matchedName });
-      gpsTrip.path.push({ lat, lng });
-      localStorage.setItem('gps-trip-draft', JSON.stringify(gpsTrip));
-      renderGpsWaypointStrip();
-      updateGpsNotification();
-      showToast(matchedName ? ("経由地を記録しました：" + matchedName) : ("経由地を記録しました（" + gpsTrip.waypoints.length + "件目）"));
-    };
-
-    if(state.settings.gmapsKey){
-      try{
-        showToast("登録済みの場所と照合中...");
-        const nearest = await findNearestKnownPlace(lat, lng);
-        if(nearest){
-          matchedName = nearest.name;
-          addr = nearest.addr;
-          finalize();
-          return;
-        }
-        await loadGoogleMapsApi();
-        new google.maps.Geocoder().geocode({ location: { lat, lng } }, (results, status)=>{
-          if(status === "OK" && results[0]) addr = results[0].formatted_address;
-          finalize();
-        });
-      }catch(e){ finalize(); }
-    } else {
-      finalize();
-    }
+    await recordGpsWaypoint(pos.coords.latitude, pos.coords.longitude);
   }catch(err){
     showToast(geoErrorMessage(err));
   }
